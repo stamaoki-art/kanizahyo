@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>📍 撮影地点 緯度経度コピー</title>
+
+  <!-- Leaflet 地図ライブラリ -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      display: flex;
+      flex-direction: column;
+      background: #263238;
+    }
+
+    /* 上部検索＆座標表示バー */
+    #top-bar {
+      background: #1565c0;
+      color: white;
+      padding: 8px 10px;
+      z-index: 1001;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .search-row {
+      display: flex;
+      gap: 6px;
+    }
+    #search-input {
+      flex: 1;
+      padding: 8px 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      background: rgba(255,255,255,0.95);
+    }
+    #search-btn {
+      padding: 0 14px;
+      border: none;
+      border-radius: 6px;
+      background: #0d47a1;
+      color: white;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #search-btn:active { background: #002171; }
+
+    /* 現在の照準座標ディスプレイ */
+    #coord-display {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 6px;
+      padding: 6px 10px;
+      text-align: center;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 17px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      color: #fff;
+      user-select: all;
+    }
+
+    /* 地図エリア */
+    #map-container {
+      flex: 1;
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 中央精密クロスヘア（照準） */
+    .crosshair-wrap {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 999;
+      pointer-events: none;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .crosshair-wrap::before, .crosshair-wrap::after {
+      content: "";
+      position: absolute;
+      background: #ff1744;
+      box-shadow: 0 0 3px rgba(255,255,255,0.95);
+    }
+    /* 横線 */
+    .crosshair-wrap::before {
+      width: 40px;
+      height: 2px;
+    }
+    /* 縦線 */
+    .crosshair-wrap::after {
+      width: 2px;
+      height: 40px;
+    }
+    .crosshair-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ff1744;
+      border: 1.5px solid white;
+      z-index: 1000;
+    }
+
+    /* 大型GPSボタン */
+    .gps-btn {
+      background: white;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      cursor: pointer;
+      border: 2px solid #1565c0;
+      user-select: none;
+    }
+    .gps-btn:active { background: #e3f2fd; transform: scale(0.95); }
+
+    /* 下部特大コピーパネル */
+    #bottom-bar {
+      background: white;
+      padding: 10px 12px 14px 12px;
+      z-index: 1001;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #copy-btn {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: 10px;
+      background: #2e7d32;
+      color: white;
+      font-size: 17px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 3px 6px rgba(46, 125, 50, 0.35);
+      transition: background 0.15s, transform 0.1s;
+    }
+    #copy-btn:active {
+      transform: scale(0.98);
+      background: #1b5e20;
+    }
+    #copy-btn.copied {
+      background: #0277bd;
+    }
+    #last-copied {
+      font-size: 12px;
+      color: #546e7a;
+      text-align: center;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 上部バー -->
+  <div id="top-bar">
+    <div class="search-row">
+      <input type="text" id="search-input" placeholder="🔍 住所・施設名で移動">
+      <button id="search-btn" onclick="searchAddress()">検索</button>
+    </div>
+    <div id="coord-display">35.681236, 139.767125</div>
+  </div>
+
+  <!-- 地図エリア -->
+  <div id="map-container">
+    <div id="map"></div>
+    <div class="crosshair-wrap"><div class="crosshair-dot"></div></div>
+  </div>
+
+  <!-- 下部コピーボタン -->
+  <div id="bottom-bar">
+    <button id="copy-btn" onclick="copyCenterCoord()">📋 この場所の座標をコピー</button>
+    <div id="last-copied">地図を動かして赤い十字を合わせてください</div>
+  </div>
+
+  <script>
+    // 前回の表示位置を復元（なければ東京駅付近）
+    let initLat = 35.681236;
+    let initLon = 139.767125;
+    let initZoom = 17;
+    try {
+      const saved = JSON.parse(localStorage.getItem('pin_copy_last_view'));
+      if (saved && saved.lat && saved.lon) {
+        initLat = saved.lat;
+        initLon = saved.lon;
+        initZoom = saved.zoom || 17;
+      }
+    } catch(e) {}
+
+    // 地図初期化
+    const map = L.map('map', { zoomControl: false }).setView([initLat, initLon], initZoom);
+    L.control.zoom({ position: 'topleft' }).addTo(map);
+
+    // 国土地理院 航空写真（デフォルト・maxZoom:20でデジタル超拡大対応）
+    const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+      maxNativeZoom: 18,
+      maxZoom: 20,
+      attribution: '国土地理院'
+    }).addTo(map);
+
+    // 国土地理院 標準地図
+    const gsiStd = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+      maxNativeZoom: 18,
+      maxZoom: 20,
+      attribution: '国土地理院'
+    });
+
+    // 国土地理院 淡色地図
+    const gsiPale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+      maxNativeZoom: 18,
+      maxZoom: 20,
+      attribution: '国土地理院'
+    });
+
+    // レイヤー切り替え（右上）
+    L.control.layers(
+      { "📡 航空写真": gsiPhoto, "🗺️ 標準地図": gsiStd, "⚪ 淡色地図": gsiPale },
+      null,
+      { position: 'topright' }
+    ).addTo(map);
+
+    // 現在地ジャンプボタン（右下）
+    const gpsControl = L.control({ position: 'bottomright' });
+    gpsControl.onAdd = function() {
+      const div = L.DomUtil.create('div', 'gps-btn');
+      div.innerHTML = '🎯';
+      div.title = '現在地へ移動';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(div, 'click', function(e) {
+        L.DomEvent.stop(e);
+        jumpToCurrentLocation();
+      });
+      return div;
+    };
+    gpsControl.addTo(map);
+
+    let myLocMarker = null;
+    let currentCoordText = "";
+
+    // 中心座標の更新処理
+    function updateCenterDisplay() {
+      const c = map.getCenter();
+      // 小数点以下6桁（約10cm単位の精度）
+      currentCoordText = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
+      document.getElementById('coord-display').innerText = currentCoordText;
+    }
+
+    map.on('move', updateCenterDisplay);
+    map.on('moveend', () => {
+      updateCenterDisplay();
+      const c = map.getCenter();
+      try {
+        localStorage.setItem('pin_copy_last_view', JSON.stringify({
+          lat: c.lat,
+          lon: c.lng,
+          zoom: map.getZoom()
+        }));
+      } catch(e) {}
+    });
+
+    // 初期表示更新
+    updateCenterDisplay();
+    setTimeout(() => { map.invalidateSize(); }, 300);
+
+    // クリップボードへコピー（最新API＋iOS/旧端末フォールバック）
+    function copyCenterCoord() {
+      const text = currentCoordText;
+      const btn = document.getElementById('copy-btn');
+      const status = document.getElementById('last-copied');
+
+      const onSuccess = () => {
+        btn.classList.add('copied');
+        btn.innerText = `✅ コピーしました！`;
+        status.innerText = `コピー済み: ${text}`;
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerText = `📋 この場所の座標をコピー`;
+        }, 1800);
+      };
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(() => fallbackCopy(text, onSuccess));
+      } else {
+        fallbackCopy(text, onSuccess);
+      }
+    }
+
+    function fallbackCopy(text, callback) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand('copy');
+        callback();
+      } catch(e) {
+        alert("コピーに失敗しました。上の数字を長押ししてコピーしてください:\n" + text);
+      }
+      document.body.removeChild(ta);
+    }
+
+    // 現在地ジャンプ機能（高精度 ➔ 基地局フォールバック）
+    function jumpToCurrentLocation() {
+      const status = document.getElementById('last-copied');
+      if (!navigator.geolocation) {
+        alert("お使いのブラウザはGPSに対応していません。");
+        return;
+      }
+
+      status.innerText = "📡 現在地を取得中...";
+
+      const onFound = (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy);
+
+        map.setView([lat, lon], 18);
+
+        if (myLocMarker) map.removeLayer(myLocMarker);
+        myLocMarker = L.circleMarker([lat, lon], {
+          radius: 10,
+          fillColor: "#0288d1",
+          color: "#ffffff",
+          weight: 3,
+          fillOpacity: 1
+        }).bindPopup(`📍 現在地（誤差約${acc}m）`).addTo(map);
+
+        status.innerText = `✅ 現在地へ移動しました（誤差約${acc}m）`;
+      };
+
+      navigator.geolocation.getCurrentPosition(
+        onFound,
+        () => {
+          // 屋内で高精度GPSがタイムアウトした場合はWi-Fi/基地局で即再試行
+          navigator.geolocation.getCurrentPosition(
+            onFound,
+            (err) => {
+              status.innerText = "⚠️ 位置情報を取得できませんでした";
+              alert("現在地を取得できませんでした。スマホの位置情報設定をご確認ください。");
+            },
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+          );
+        },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+      );
+    }
+
+    // 住所検索（国土地理院API）
+    async function searchAddress() {
+      const q = document.getElementById('search-input').value.trim();
+      if (!q) return;
+      const status = document.getElementById('last-copied');
+      status.innerText = "🔍 検索中...";
+      try {
+        const res = await fetch(`https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (data && data.length > 0 && data[0].geometry) {
+          const coords = data[0].geometry.coordinates;
+          map.setView([coords[1], coords[0]], 18);
+          status.innerText = `移動完了: ${data[0].properties.title || q}`;
+        } else {
+          status.innerText = "住所が見つかりませんでした";
+          alert("住所が見つかりませんでした。");
+        }
+      } catch(e) {
+        status.innerText = "検索エラーが発生しました";
+      }
+    }
+
+    // Enterキーでも住所検索できるようにする
+    document.getElementById('search-input').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') searchAddress();
+    });
+  </script>
+</body>
+</html>
