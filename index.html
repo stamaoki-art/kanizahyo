@@ -77,6 +77,7 @@
       text-align: center;
       font-weight: bold;
       min-height: 18px;
+      word-break: break-all;
     }
 
     /* 上部検索＆座標表示バー */
@@ -90,10 +91,7 @@
       flex-direction: column;
       gap: 6px;
     }
-    .search-row {
-      display: flex;
-      gap: 6px;
-    }
+    .search-row { display: flex; gap: 6px; }
     #search-input {
       flex: 1;
       padding: 8px 10px;
@@ -114,7 +112,6 @@
     }
     #search-btn:active { background: #002171; }
 
-    /* 現在の照準座標ディスプレイ */
     #coord-display {
       background: rgba(0, 0, 0, 0.35);
       border-radius: 6px;
@@ -128,19 +125,9 @@
       user-select: all;
     }
 
-    /* 地図エリア */
-    #map-container {
-      flex: 1;
-      position: relative;
-      width: 100%;
-      height: 100%;
-    }
-    #map {
-      width: 100%;
-      height: 100%;
-    }
+    #map-container { flex: 1; position: relative; width: 100%; height: 100%; }
+    #map { width: 100%; height: 100%; }
 
-    /* 中央精密クロスヘア（照準） */
     .crosshair-wrap {
       position: absolute;
       top: 50%;
@@ -171,11 +158,11 @@
       z-index: 1000;
     }
 
-    /* 大型GPSボタン */
+    /* 大型GPSボタン（測位中は点滅アニメーション） */
     .gps-btn {
       background: white;
-      width: 52px;
-      height: 52px;
+      width: 54px;
+      height: 54px;
       border-radius: 50%;
       box-shadow: 0 3px 8px rgba(0,0,0,0.4);
       display: flex;
@@ -187,8 +174,17 @@
       user-select: none;
     }
     .gps-btn:active { background: #e3f2fd; transform: scale(0.95); }
+    .gps-btn.tracking {
+      border-color: #ef6c00;
+      background: #fff3e0;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 108, 0, 0.7); }
+      70% { box-shadow: 0 0 0 12px rgba(239, 108, 0, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 108, 0, 0); }
+    }
 
-    /* 下部アクションパネル */
     #bottom-bar {
       background: white;
       padding: 10px 10px 14px 10px;
@@ -198,10 +194,7 @@
       flex-direction: column;
       gap: 6px;
     }
-    .action-row {
-      display: flex;
-      gap: 8px;
-    }
+    .action-row { display: flex; gap: 8px; }
     #copy-btn {
       flex: 3;
       padding: 14px 8px;
@@ -215,13 +208,8 @@
       box-shadow: 0 3px 6px rgba(46, 125, 50, 0.35);
       transition: background 0.15s, transform 0.1s;
     }
-    #copy-btn:active {
-      transform: scale(0.98);
-      background: #1b5e20;
-    }
-    #copy-btn.copied {
-      background: #0277bd;
-    }
+    #copy-btn:active { transform: scale(0.98); background: #1b5e20; }
+    #copy-btn.copied { background: #0277bd; }
     #chiban-btn {
       flex: 2;
       padding: 14px 8px;
@@ -235,15 +223,13 @@
       box-shadow: 0 3px 6px rgba(239, 108, 0, 0.35);
       transition: background 0.15s, transform 0.1s;
     }
-    #chiban-btn:active {
-      transform: scale(0.98);
-      background: #e65100;
-    }
+    #chiban-btn:active { transform: scale(0.98); background: #e65100; }
     #last-copied {
       font-size: 12px;
       color: #546e7a;
       text-align: center;
       min-height: 16px;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -290,7 +276,6 @@
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwgACE4MO8AGrVOtcNb3Z_Cut7ep7YdHI8oLwNIotZbbV4n2DG1kIuoXjsDA4iITOrLAQ/exec";
     // =========================================================================
 
-    // --- 🔐 認証・ログイン制御 ---
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
       setTimeout(() => { map.invalidateSize(); }, 100);
@@ -315,38 +300,42 @@
       msg.innerText = "";
 
       try {
-        const res = await fetch(GAS_URL, {
-          method: "POST",
-          body: JSON.stringify({ id: id, pass: pass })
-        });
-        const data = await res.json();
+        const url = `${GAS_URL}?id=${encodeURIComponent(id)}&pass=${encodeURIComponent(pass)}`;
+        const res = await fetch(url);
+        const text = await res.text();
+        
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          msg.innerText = "⚠️ Google側でブロックされました（URL確認）";
+          btn.innerText = "ログイン";
+          btn.disabled = false;
+          return;
+        }
 
         if (data.success) {
-          // 許可されたらIDとパスを端末に記憶してロック解除
           localStorage.setItem("pin_auth_id", id);
           localStorage.setItem("pin_auth_pass", pass);
           unlockApp();
         } else {
-          // スプレッドシートで「停止」になった、または不一致なら記憶を消して締め出す
           localStorage.removeItem("pin_auth_id");
           localStorage.removeItem("pin_auth_pass");
-          msg.innerText = data.msg;
+          msg.innerText = "❌ " + data.msg;
           btn.innerText = "ログイン";
           btn.disabled = false;
         }
       } catch (err) {
-        // 現場の山奥などで電波が圏外だった場合、過去にログイン済みの端末なら一時通過させる
         if (isAuto && localStorage.getItem("pin_auth_id")) {
           unlockApp();
         } else {
-          msg.innerText = "通信エラー。電波の良い場所でやり直してください。";
+          msg.innerText = "通信エラー: " + err.message;
           btn.innerText = "ログイン";
           btn.disabled = false;
         }
       }
     }
 
-    // 起動時に過去のログイン情報があれば自動チェック実行
     window.addEventListener("DOMContentLoaded", () => {
       const savedId = localStorage.getItem("pin_auth_id");
       const savedPass = localStorage.getItem("pin_auth_pass");
@@ -357,13 +346,11 @@
       }
     });
 
-    // Enterキーでもログインできるようにする
     document.getElementById("login-pass").addEventListener("keypress", (e) => {
       if (e.key === "Enter") attemptLogin(false);
     });
 
-
-    // --- 🗺️ 地図・座標コピー・地番図ロジック ---
+    // --- 🗺️ 地図・高精度GPS・座標コピーロジック ---
     let initLat = 35.681236;
     let initLon = 139.767125;
     let initZoom = 17;
@@ -403,11 +390,13 @@
       { position: 'topright' }
     ).addTo(map);
 
+    let gpsBtnEl = null;
     const gpsControl = L.control({ position: 'bottomright' });
     gpsControl.onAdd = function() {
       const div = L.DomUtil.create('div', 'gps-btn');
       div.innerHTML = '🎯';
-      div.title = '現在地へ移動';
+      div.title = '現在地へ精密移動';
+      gpsBtnEl = div;
       L.DomEvent.disableClickPropagation(div);
       L.DomEvent.on(div, 'click', function(e) {
         L.DomEvent.stop(e);
@@ -418,7 +407,10 @@
     gpsControl.addTo(map);
 
     let myLocMarker = null;
+    let myLocCircle = null;
     let currentCoordText = "";
+    let gpsWatchId = null;
+    let gpsStopTimer = null;
 
     function updateCenterDisplay() {
       const c = map.getCenter();
@@ -439,16 +431,21 @@
       } catch(e) {}
     });
 
+    // ★ 測位中にユーザーが手動で地図を動かしたら自動追尾を即解除
+    map.on('dragstart', () => {
+      if (gpsWatchId !== null) {
+        stopGpsWatch("✋ 手動調整モードに切り替えました");
+      }
+    });
+
     updateCenterDisplay();
 
-    // 地番図を開く
     function openChibanMap() {
       const c = map.getCenter();
       const url = `https://chiban.koaza.net/#18/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`;
       window.open(url, '_blank');
     }
 
-    // クリップボードへコピー
     function copyCenterCoord() {
       const text = currentCoordText;
       const btn = document.getElementById('copy-btn');
@@ -488,7 +485,22 @@
       document.body.removeChild(ta);
     }
 
-    // 現在地ジャンプ機能
+    function stopGpsWatch(msgText) {
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+      }
+      if (gpsStopTimer !== null) {
+        clearTimeout(gpsStopTimer);
+        gpsStopTimer = null;
+      }
+      if (gpsBtnEl) gpsBtnEl.classList.remove('tracking');
+      if (msgText) {
+        document.getElementById('last-copied').innerText = msgText;
+      }
+    }
+
+    // ★ 高精度GPS連続追い込み測位
     function jumpToCurrentLocation() {
       const status = document.getElementById('last-copied');
       if (!navigator.geolocation) {
@@ -496,41 +508,78 @@
         return;
       }
 
-      status.innerText = "📡 現在地を取得中...";
+      // すでに測位中なら一旦リセット
+      stopGpsWatch();
+      if (gpsBtnEl) gpsBtnEl.classList.add('tracking');
+      status.innerText = "🛰️ GPS衛星を捕捉中...（最大10秒間絞り込み）";
 
-      const onFound = (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        const acc = Math.round(pos.coords.accuracy);
+      let bestAccuracy = Infinity;
+      let latestAcc = null;
 
-        map.setView([lat, lon], 18);
+      gpsWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          const acc = pos.coords.accuracy;
+          latestAcc = Math.round(acc);
 
-        if (myLocMarker) map.removeLayer(myLocMarker);
-        myLocMarker = L.circleMarker([lat, lon], {
-          radius: 10,
-          fillColor: "#0288d1",
-          color: "#ffffff",
-          weight: 3,
-          fillOpacity: 1
-        }).bindPopup(`📍 現在地（誤差約${acc}m）`).addTo(map);
+          // より精度が高い（誤差が小さい）データが来たら地図とマーカーを更新
+          if (acc <= bestAccuracy) {
+            bestAccuracy = acc;
 
-        status.innerText = `✅ 現在地へ移動しました（誤差約${acc}m）`;
-      };
+            // 精度に応じてズーム倍率を自動調整（誤差15m以内なら超拡大ズーム19）
+            const targetZoom = acc <= 15 ? 19 : 18;
+            map.setView([lat, lon], targetZoom);
 
-      navigator.geolocation.getCurrentPosition(
-        onFound,
-        () => {
-          navigator.geolocation.getCurrentPosition(
-            onFound,
-            () => {
-              status.innerText = "⚠️ 位置情報を取得できませんでした";
-              alert("現在地を取得できませんでした。スマホの位置情報設定をご確認ください。");
-            },
-            { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
-          );
+            if (myLocMarker) map.removeLayer(myLocMarker);
+            if (myLocCircle) map.removeLayer(myLocCircle);
+
+            // 誤差範囲を示す半透明サークル
+            myLocCircle = L.circle([lat, lon], {
+              radius: acc,
+              color: "#0288d1",
+              weight: 1,
+              fillColor: "#03a9f4",
+              fillOpacity: 0.18
+            }).addTo(map);
+
+            // 現在地中心ドット
+            myLocMarker = L.circleMarker([lat, lon], {
+              radius: 8,
+              fillColor: "#0288d1",
+              color: "#ffffff",
+              weight: 3,
+              fillOpacity: 1
+            }).bindPopup(`📍 現在地（誤差約${latestAcc}m）`).addTo(map);
+
+            // 誤差6m以下に達したら十分な精度なので即座にロック確定
+            if (acc <= 6) {
+              stopGpsWatch(`🎯 高精度ロック完了！（誤差約${latestAcc}m）`);
+            } else {
+              status.innerText = `🛰️ 精密測位中... 現在誤差: 約${latestAcc}m（さらに絞り込み中）`;
+            }
+          }
         },
-        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+        (err) => {
+          stopGpsWatch("⚠️ 位置情報を取得できませんでした");
+          alert("現在地を取得できませんでした。スマホの「正確な位置情報」設定をご確認ください。");
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        }
       );
+
+      // 10秒経過したら、その時点のベスト精度で確定してバッテリー消費を止める
+      gpsStopTimer = setTimeout(() => {
+        if (gpsWatchId !== null) {
+          const finalMsg = latestAcc !== null
+            ? `✅ 現在地確定（誤差約${Math.round(bestAccuracy)}m）`
+            : "⚠️ タイムアウトしました";
+          stopGpsWatch(finalMsg);
+        }
+      }, 10000);
     }
 
     // 住所検索
