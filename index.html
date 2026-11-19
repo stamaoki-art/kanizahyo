@@ -19,6 +19,66 @@
       background: #263238;
     }
 
+    /* 🔐 ログイン画面オーバーレイ */
+    #login-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #263238;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-card {
+      background: white;
+      padding: 24px 20px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 340px;
+      color: #333;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .login-card h3 {
+      text-align: center;
+      margin-bottom: 16px;
+      color: #1565c0;
+      font-size: 18px;
+    }
+    .login-input {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 15px;
+    }
+    #login-btn {
+      width: 100%;
+      padding: 13px;
+      background: #1565c0;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #login-btn:active { background: #0d47a1; }
+    #login-btn:disabled { background: #90caf9; cursor: not-allowed; }
+    #login-msg {
+      color: #c62828;
+      font-size: 13px;
+      margin-top: 12px;
+      text-align: center;
+      font-weight: bold;
+      min-height: 18px;
+    }
+
     /* 上部検索＆座標表示バー */
     #top-bar {
       background: #1565c0;
@@ -189,6 +249,17 @@
 </head>
 <body>
 
+  <!-- 🔐 ログイン画面 -->
+  <div id="login-screen">
+    <div class="login-card">
+      <h3>📍 現場ツール ログイン</h3>
+      <input type="text" id="login-id" class="login-input" placeholder="IDを入力" autocomplete="username">
+      <input type="password" id="login-pass" class="login-input" placeholder="パスワード" autocomplete="current-password">
+      <button id="login-btn" onclick="attemptLogin(false)">ログイン</button>
+      <div id="login-msg"></div>
+    </div>
+  </div>
+
   <!-- 上部バー -->
   <div id="top-bar">
     <div class="search-row">
@@ -214,7 +285,85 @@
   </div>
 
   <script>
-    // 前回の表示位置を復元
+    // =========================================================================
+    // 💡【重要】ここにあなたのGoogle Apps Script（ウェブアプリ）のURLを貼り付けてください！
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbz01QJtlMv2w9cT5su2sCkWUBFVMBFp1lV1Pa9U4VKM5RZDvsHWf6PZPNgMeY-CN89hRg/exec";
+    // =========================================================================
+
+    // --- 🔐 認証・ログイン制御 ---
+    function unlockApp() {
+      document.getElementById("login-screen").style.display = "none";
+      setTimeout(() => { map.invalidateSize(); }, 100);
+    }
+
+    async function attemptLogin(isAuto = false) {
+      const idInput = document.getElementById("login-id");
+      const passInput = document.getElementById("login-pass");
+      const msg = document.getElementById("login-msg");
+      const btn = document.getElementById("login-btn");
+
+      const id = idInput.value.trim();
+      const pass = passInput.value.trim();
+
+      if (!id || !pass) {
+        if (!isAuto) msg.innerText = "IDとパスワードを入力してください";
+        return;
+      }
+
+      btn.innerText = isAuto ? "認証確認中..." : "ログイン中...";
+      btn.disabled = true;
+      msg.innerText = "";
+
+      try {
+        const res = await fetch(GAS_URL, {
+          method: "POST",
+          body: JSON.stringify({ id: id, pass: pass })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          // 許可されたらIDとパスを端末に記憶してロック解除
+          localStorage.setItem("pin_auth_id", id);
+          localStorage.setItem("pin_auth_pass", pass);
+          unlockApp();
+        } else {
+          // スプレッドシートで「停止」になった、または不一致なら記憶を消して締め出す
+          localStorage.removeItem("pin_auth_id");
+          localStorage.removeItem("pin_auth_pass");
+          msg.innerText = data.msg;
+          btn.innerText = "ログイン";
+          btn.disabled = false;
+        }
+      } catch (err) {
+        // 現場の山奥などで電波が圏外だった場合、過去にログイン済みの端末なら一時通過させる
+        if (isAuto && localStorage.getItem("pin_auth_id")) {
+          unlockApp();
+        } else {
+          msg.innerText = "通信エラー。電波の良い場所でやり直してください。";
+          btn.innerText = "ログイン";
+          btn.disabled = false;
+        }
+      }
+    }
+
+    // 起動時に過去のログイン情報があれば自動チェック実行
+    window.addEventListener("DOMContentLoaded", () => {
+      const savedId = localStorage.getItem("pin_auth_id");
+      const savedPass = localStorage.getItem("pin_auth_pass");
+      if (savedId && savedPass) {
+        document.getElementById("login-id").value = savedId;
+        document.getElementById("login-pass").value = savedPass;
+        attemptLogin(true);
+      }
+    });
+
+    // Enterキーでもログインできるようにする
+    document.getElementById("login-pass").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") attemptLogin(false);
+    });
+
+
+    // --- 🗺️ 地図・座標コピー・地番図ロジック ---
     let initLat = 35.681236;
     let initLon = 139.767125;
     let initZoom = 17;
@@ -227,25 +376,21 @@
       }
     } catch(e) {}
 
-    // 地図初期化
     const map = L.map('map', { zoomControl: false }).setView([initLat, initLon], initZoom);
     L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    // 国土地理院 航空写真（デフォルト・超拡大対応）
     const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
       maxNativeZoom: 18,
       maxZoom: 20,
       attribution: '国土地理院'
     }).addTo(map);
 
-    // 国土地理院 標準地図
     const gsiStd = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
       maxNativeZoom: 18,
       maxZoom: 20,
       attribution: '国土地理院'
     });
 
-    // 国土地理院 淡色地図
     const gsiPale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
       maxNativeZoom: 18,
       maxZoom: 20,
@@ -258,7 +403,6 @@
       { position: 'topright' }
     ).addTo(map);
 
-    // 現在地ジャンプボタン（右下）
     const gpsControl = L.control({ position: 'bottomright' });
     gpsControl.onAdd = function() {
       const div = L.DomUtil.create('div', 'gps-btn');
@@ -276,7 +420,6 @@
     let myLocMarker = null;
     let currentCoordText = "";
 
-    // 中心座標の更新処理
     function updateCenterDisplay() {
       const c = map.getCenter();
       currentCoordText = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
@@ -297,9 +440,8 @@
     });
 
     updateCenterDisplay();
-    setTimeout(() => { map.invalidateSize(); }, 300);
 
-    // ★ 地番図 (chiban.koaza.net) をズーム18の十字座標で開く
+    // 地番図を開く
     function openChibanMap() {
       const c = map.getCenter();
       const url = `https://chiban.koaza.net/#18/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`;
