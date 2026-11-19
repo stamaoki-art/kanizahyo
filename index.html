@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>📍 撮影地点 緯度経度コピー</title>
+  <title>📍 撮影地点 緯度経度コピー＆地番図</title>
 
   <!-- Leaflet 地図ライブラリ -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -100,16 +100,8 @@
       background: #ff1744;
       box-shadow: 0 0 3px rgba(255,255,255,0.95);
     }
-    /* 横線 */
-    .crosshair-wrap::before {
-      width: 40px;
-      height: 2px;
-    }
-    /* 縦線 */
-    .crosshair-wrap::after {
-      width: 2px;
-      height: 40px;
-    }
+    .crosshair-wrap::before { width: 40px; height: 2px; }
+    .crosshair-wrap::after { width: 2px; height: 40px; }
     .crosshair-dot {
       width: 6px;
       height: 6px;
@@ -136,24 +128,28 @@
     }
     .gps-btn:active { background: #e3f2fd; transform: scale(0.95); }
 
-    /* 下部特大コピーパネル */
+    /* 下部アクションパネル */
     #bottom-bar {
       background: white;
-      padding: 10px 12px 14px 12px;
+      padding: 10px 10px 14px 10px;
       z-index: 1001;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
+    .action-row {
+      display: flex;
+      gap: 8px;
+    }
     #copy-btn {
-      width: 100%;
-      padding: 15px;
+      flex: 3;
+      padding: 14px 8px;
       border: none;
       border-radius: 10px;
       background: #2e7d32;
       color: white;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: bold;
       cursor: pointer;
       box-shadow: 0 3px 6px rgba(46, 125, 50, 0.35);
@@ -165,6 +161,23 @@
     }
     #copy-btn.copied {
       background: #0277bd;
+    }
+    #chiban-btn {
+      flex: 2;
+      padding: 14px 8px;
+      border: none;
+      border-radius: 10px;
+      background: #ef6c00;
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 3px 6px rgba(239, 108, 0, 0.35);
+      transition: background 0.15s, transform 0.1s;
+    }
+    #chiban-btn:active {
+      transform: scale(0.98);
+      background: #e65100;
     }
     #last-copied {
       font-size: 12px;
@@ -191,14 +204,17 @@
     <div class="crosshair-wrap"><div class="crosshair-dot"></div></div>
   </div>
 
-  <!-- 下部コピーボタン -->
+  <!-- 下部ボタン群 -->
   <div id="bottom-bar">
-    <button id="copy-btn" onclick="copyCenterCoord()">📋 この場所の座標をコピー</button>
+    <div class="action-row">
+      <button id="copy-btn" onclick="copyCenterCoord()">📋 座標コピー</button>
+      <button id="chiban-btn" onclick="openChibanMap()">🗺️ 地番図</button>
+    </div>
     <div id="last-copied">地図を動かして赤い十字を合わせてください</div>
   </div>
 
   <script>
-    // 前回の表示位置を復元（なければ東京駅付近）
+    // 前回の表示位置を復元
     let initLat = 35.681236;
     let initLon = 139.767125;
     let initZoom = 17;
@@ -215,7 +231,7 @@
     const map = L.map('map', { zoomControl: false }).setView([initLat, initLon], initZoom);
     L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    // 国土地理院 航空写真（デフォルト・maxZoom:20でデジタル超拡大対応）
+    // 国土地理院 航空写真（デフォルト・超拡大対応）
     const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
       maxNativeZoom: 18,
       maxZoom: 20,
@@ -236,7 +252,6 @@
       attribution: '国土地理院'
     });
 
-    // レイヤー切り替え（右上）
     L.control.layers(
       { "📡 航空写真": gsiPhoto, "🗺️ 標準地図": gsiStd, "⚪ 淡色地図": gsiPale },
       null,
@@ -264,7 +279,6 @@
     // 中心座標の更新処理
     function updateCenterDisplay() {
       const c = map.getCenter();
-      // 小数点以下6桁（約10cm単位の精度）
       currentCoordText = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
       document.getElementById('coord-display').innerText = currentCoordText;
     }
@@ -282,11 +296,17 @@
       } catch(e) {}
     });
 
-    // 初期表示更新
     updateCenterDisplay();
     setTimeout(() => { map.invalidateSize(); }, 300);
 
-    // クリップボードへコピー（最新API＋iOS/旧端末フォールバック）
+    // ★ 地番図 (chiban.koaza.net) をズーム18の十字座標で開く
+    function openChibanMap() {
+      const c = map.getCenter();
+      const url = `https://chiban.koaza.net/#18/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`;
+      window.open(url, '_blank');
+    }
+
+    // クリップボードへコピー
     function copyCenterCoord() {
       const text = currentCoordText;
       const btn = document.getElementById('copy-btn');
@@ -294,11 +314,11 @@
 
       const onSuccess = () => {
         btn.classList.add('copied');
-        btn.innerText = `✅ コピーしました！`;
+        btn.innerText = `✅ コピー完了！`;
         status.innerText = `コピー済み: ${text}`;
         setTimeout(() => {
           btn.classList.remove('copied');
-          btn.innerText = `📋 この場所の座標をコピー`;
+          btn.innerText = `📋 座標コピー`;
         }, 1800);
       };
 
@@ -326,7 +346,7 @@
       document.body.removeChild(ta);
     }
 
-    // 現在地ジャンプ機能（高精度 ➔ 基地局フォールバック）
+    // 現在地ジャンプ機能
     function jumpToCurrentLocation() {
       const status = document.getElementById('last-copied');
       if (!navigator.geolocation) {
@@ -358,10 +378,9 @@
       navigator.geolocation.getCurrentPosition(
         onFound,
         () => {
-          // 屋内で高精度GPSがタイムアウトした場合はWi-Fi/基地局で即再試行
           navigator.geolocation.getCurrentPosition(
             onFound,
-            (err) => {
+            () => {
               status.innerText = "⚠️ 位置情報を取得できませんでした";
               alert("現在地を取得できませんでした。スマホの位置情報設定をご確認ください。");
             },
@@ -372,7 +391,7 @@
       );
     }
 
-    // 住所検索（国土地理院API）
+    // 住所検索
     async function searchAddress() {
       const q = document.getElementById('search-input').value.trim();
       if (!q) return;
@@ -394,7 +413,6 @@
       }
     }
 
-    // Enterキーでも住所検索できるようにする
     document.getElementById('search-input').addEventListener('keypress', function(e) {
       if (e.key === 'Enter') searchAddress();
     });
