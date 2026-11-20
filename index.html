@@ -343,13 +343,14 @@
     .chiban-header {
       background: #ef6c00;
       color: white;
-      padding: 5px 6px;
+      padding: 4px 5px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 4px;
+      gap: 3px;
       font-size: 12px;
       font-weight: bold;
+      z-index: 2;
     }
     .chiban-title {
       white-space: nowrap;
@@ -366,7 +367,7 @@
       color: white;
       border: 1px solid rgba(255,255,255,0.4);
       border-radius: 4px;
-      padding: 3px 6px;
+      padding: 3px 5px;
       font-size: 11px;
       font-weight: bold;
       cursor: pointer;
@@ -374,19 +375,35 @@
     }
     .chiban-mini-btn:active { background: rgba(0, 0, 0, 0.45); }
 
-    /* スマホ幅では地番図ヘッダーをスリム表示にしてボタン切れを防止 */
     @media (max-width: 600px) {
       .chiban-sub { display: none; }
-      .chiban-header { font-size: 11px; padding: 4px 5px; }
-      .chiban-mini-btn { padding: 3px 5px; font-size: 10px; }
+      .chiban-header { font-size: 11px; padding: 4px 4px; }
+      .chiban-mini-btn { padding: 3px 4px; font-size: 10px; }
     }
 
-    #chiban-frame {
+    /* ★ 地番図トリミング用ラッパー（上下96pxずつ外へ押し出し、中心位置は完全維持） */
+    #chiban-frame-wrap {
+      position: relative;
       flex: 1;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #e0e0e0;
+    }
+    #chiban-frame {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       border: none;
       background: white;
+      transition: top 0.15s ease, height 0.15s ease;
+    }
+    /* UI非表示モード：上部ヘッダー＋sb-btn列(96px)と下部#statusバー(96px)を枠外へ隠す */
+    #chiban-frame-wrap.crop-ui #chiban-frame {
+      top: -96px;
+      height: calc(100% + 192px);
     }
 
     .crosshair-wrap {
@@ -619,14 +636,18 @@
 
     <div id="chiban-pane">
       <div class="chiban-header">
-        <span class="chiban-title">🗺️ 地番図<span class="chiban-sub">（連動中）</span></span>
+        <span class="chiban-title">🗺️<span class="chiban-sub"> 地番図</span></span>
         <div class="chiban-actions">
+          <button id="chiban-ui-btn" class="chiban-mini-btn" onclick="toggleChibanUiCrop()" title="地番図サイトのボタン・バー表示切替">👁️ UI表示</button>
           <button class="chiban-mini-btn" onclick="syncChibanFrame(true)" title="現在の航空写真の中心座標へ強制再同期">🔄 同期</button>
           <button class="chiban-mini-btn" onclick="openChibanNewTab()" title="新しいタブで全画面表示">↗ 別タブ</button>
           <button class="chiban-mini-btn" onclick="toggleChibanSplit()" title="地番図を閉じる">✕</button>
         </div>
       </div>
-      <iframe id="chiban-frame" src="about:blank" loading="lazy"></iframe>
+      <!-- 初期状態で crop-ui を有効化し、sb-btn と下部ステータスバーを枠外へ隠す -->
+      <div id="chiban-frame-wrap" class="crop-ui">
+        <iframe id="chiban-frame" src="about:blank" loading="lazy"></iframe>
+      </div>
     </div>
   </div>
 
@@ -658,6 +679,7 @@
     let calViewYear = new Date().getFullYear();
     let calViewMonth = new Date().getMonth();
     let isChibanOpen = false;
+    let isChibanUiCropped = true;
 
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
@@ -818,7 +840,6 @@
         }));
       } catch(e) {}
 
-      // ★ 地番図分割パネルが開いていたら自動で座標同期
       if (isChibanOpen) {
         syncChibanFrame(false);
       }
@@ -833,12 +854,26 @@
     updateCenterDisplay();
 
     // =========================================================================
-    // 🗺️ 地番図 左右2画面分割 ＆ 位置同期ロジック
+    // 🗺️ 地番図 左右2画面分割 ＆ UIトリミング ＆ 位置同期ロジック
     // =========================================================================
     function buildChibanUrl() {
       const c = map.getCenter();
       const z = Math.min(Math.max(map.getZoom(), 15), 19);
       return `https://chiban.koaza.net/#${z}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`;
+    }
+
+    function toggleChibanUiCrop() {
+      const wrap = document.getElementById('chiban-frame-wrap');
+      const btn = document.getElementById('chiban-ui-btn');
+      isChibanUiCropped = !isChibanUiCropped;
+
+      if (isChibanUiCropped) {
+        wrap.classList.add('crop-ui');
+        btn.innerText = '👁️ UI表示';
+      } else {
+        wrap.classList.remove('crop-ui');
+        btn.innerText = '✂️ UI隠す';
+      }
     }
 
     function toggleChibanSplit() {
@@ -853,7 +888,7 @@
         btn.classList.add('active');
         btn.innerText = '🗺️ 地番図閉じる';
         syncChibanFrame(false);
-        status.innerText = '🗺️ 左右比較モード（左を動かすと右の地番図も追従します）';
+        status.innerText = '🗺️ 左右比較モード（ボタン類を非表示にして地番を拡大中）';
       } else {
         pane.style.display = 'none';
         btn.classList.remove('active');
@@ -862,7 +897,6 @@
         status.innerText = '1画面表示に戻しました';
       }
 
-      // 分割幅が変わるのでLeafletの描画サイズを再計算
       setTimeout(() => { map.invalidateSize(); }, 100);
     }
 
