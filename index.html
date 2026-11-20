@@ -9,6 +9,9 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- SheetJS Excel(.xlsx)出力ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { width: 100%; height: 100%; overflow: hidden; }
@@ -155,16 +158,12 @@
       border: 1px solid transparent;
       user-select: none;
     }
-    .cal-cell.empty {
-      background: transparent;
-    }
-    /* 記録がない日 */
+    .cal-cell.empty { background: transparent; }
     .cal-cell.no-data {
       color: #b0bec5;
       background: #fafafa;
       cursor: default;
     }
-    /* ★ 記録がある日（緑ハイライト＋件数バッジ） */
     .cal-cell.has-data {
       background: #e8f5e9;
       border: 1.5px solid #2e7d32;
@@ -177,19 +176,13 @@
       transform: scale(0.94);
       background: #c8e6c9;
     }
-    /* 選択中の日付 */
     .cal-cell.selected {
       background: #2e7d32 !important;
       color: #ffffff !important;
       border-color: #1b5e20 !important;
     }
-    .cal-cell.selected .cal-badge {
-      color: #c8e6c9 !important;
-    }
-    /* 今日マーク */
-    .cal-cell.is-today {
-      box-shadow: inset 0 0 0 2px #1565c0;
-    }
+    .cal-cell.selected .cal-badge { color: #c8e6c9 !important; }
+    .cal-cell.is-today { box-shadow: inset 0 0 0 2px #1565c0; }
     .cal-badge {
       font-size: 10px;
       line-height: 1;
@@ -264,7 +257,6 @@
     }
     #search-btn:active { background: #002171; }
 
-    /* 座標ディスプレイ ＆ 履歴期間セレクタ ＆ カレンダーボタン */
     .status-row {
       display: flex;
       gap: 5px;
@@ -430,34 +422,28 @@
     #register-btn:active { transform: scale(0.97); background: #0d47a1; }
     #register-btn:disabled { background: #90caf9; cursor: not-allowed; }
 
-    .action-row { display: flex; gap: 8px; }
-    #copy-btn {
-      flex: 3;
-      padding: 11px 8px;
+    /* サブアクション行（座標コピー・地番図・Excel出力の3ボタン） */
+    .action-row { display: flex; gap: 6px; }
+    .sub-btn {
+      flex: 1;
+      padding: 11px 4px;
       border: none;
       border-radius: 8px;
-      background: #2e7d32;
       color: white;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: bold;
       cursor: pointer;
       transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
     }
-    #copy-btn:active { transform: scale(0.98); background: #1b5e20; }
+    .sub-btn:active { transform: scale(0.97); }
+    #copy-btn { background: #2e7d32; }
+    #copy-btn:active { background: #1b5e20; }
     #copy-btn.copied { background: #0277bd; }
-    #chiban-btn {
-      flex: 2;
-      padding: 11px 8px;
-      border: none;
-      border-radius: 8px;
-      background: #ef6c00;
-      color: white;
-      font-size: 14px;
-      font-weight: bold;
-      cursor: pointer;
-      transition: background 0.15s, transform 0.1s;
-    }
-    #chiban-btn:active { transform: scale(0.98); background: #e65100; }
+    #chiban-btn { background: #ef6c00; }
+    #chiban-btn:active { background: #e65100; }
+    #export-btn { background: #00695c; }
+    #export-btn:active { background: #004d40; }
 
     #last-copied {
       font-size: 12px;
@@ -469,7 +455,7 @@
 
     .popup-btn {
       margin-top: 6px;
-      padding: 5px 8px;
+      padding: 6px 8px;
       border: none;
       border-radius: 4px;
       background: #1565c0;
@@ -478,6 +464,11 @@
       font-weight: bold;
       cursor: pointer;
       width: 100%;
+    }
+    .popup-btn:active { opacity: 0.85; }
+    .popup-btn-del {
+      margin-top: 8px;
+      background: #c62828;
     }
   </style>
 </head>
@@ -554,8 +545,9 @@
     </div>
 
     <div class="action-row">
-      <button id="copy-btn" onclick="copyCenterCoord()">📋 座標コピー</button>
-      <button id="chiban-btn" onclick="openChibanMap()">🗺️ 地番図</button>
+      <button id="copy-btn" class="sub-btn" onclick="copyCenterCoord()">📋 座標コピー</button>
+      <button id="chiban-btn" class="sub-btn" onclick="openChibanMap()">🗺️ 地番図</button>
+      <button id="export-btn" class="sub-btn" onclick="exportVisiblePinsToExcel()">📊 Excel出力</button>
     </div>
     <div id="last-copied">地図を動かして赤い十字を合わせてください</div>
   </div>
@@ -566,14 +558,15 @@
     const GAS_URL = "https://script.google.com/macros/s/AKfycbykbAEEHsAplk7ByKg_p78qEUE5G1H6Og1PMNdvvBZXMq6LYdG0R221VRslT6iAfSf-2g/exec";
 
     // 💡【重要2】記録シート用スプレッドシートのGAS URL
-    const RECORD_GAS_URL = "https://script.google.com/macros/s/AKfycbzNqrsg0iK6ajdm9n03QuMyvJuVpD0udPN1GsDAaHTUEm8aQ3Wn2wFnZDRWqyhjuwtIng/exec";
+    const RECORD_GAS_URL = "https://script.google.com/macros/s/AKfycbzRr9v8givwn_xrukh8FEKVGjrNM20uosMgrwSvzQ8qU8Fh_JxgJT4unWO89T9NzzI0/exec";
     // =========================================================================
 
-    // キャッシュデータ（ログインユーザーの全記録を保持し、カレンダー色付け＆高速表示に利用）
     let allUserRecords = [];
-    let selectedDateKey = ""; // "YYYY-MM-DD"
+    let currentVisibleRecords = []; // 今地図に表示されているピン一覧
+    let recordUidCounter = 0;
+    let selectedDateKey = "";
     let calViewYear = new Date().getFullYear();
-    let calViewMonth = new Date().getMonth(); // 0-11
+    let calViewMonth = new Date().getMonth();
 
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
@@ -743,7 +736,6 @@
 
     updateCenterDisplay();
 
-    // 日本時間（JST）の現在日付キー "YYYY-MM-DD" を返すヘルパー
     function getJstTodayKey(offsetDays = 0) {
       const now = new Date();
       const jstMs = now.getTime() + 9 * 3600 * 1000 + offsetDays * 86400 * 1000;
@@ -752,6 +744,14 @@
       const m = String(d.getUTCMonth() + 1).padStart(2, '0');
       const day = String(d.getUTCDate()).padStart(2, '0');
       return `${y}-${m}-${day}`;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
     // ピン用ユーティリティ
@@ -770,10 +770,58 @@
       }
     };
 
+    // ★ ピン削除処理
+    window.deletePinRecord = async function(uid) {
+      const item = allUserRecords.find(r => r._uid === uid);
+      if (!item) return;
+
+      const ok = confirm(`管理番号「${item.manageId}」（${item.recordDate}）をスプレッドシートから完全に削除しますか？`);
+      if (!ok) return;
+
+      map.closePopup();
+      const statusEl = document.getElementById("last-copied");
+      const author = localStorage.getItem("pin_auth_id") || "";
+
+      statusEl.style.color = "#c62828";
+      statusEl.innerText = `⏳ 「${item.manageId}」を削除中...`;
+
+      try {
+        const url = `${RECORD_GAS_URL}?action=delete&author=${encodeURIComponent(author)}&manageId=${encodeURIComponent(item.manageId)}&lat=${encodeURIComponent(item.lat)}&lon=${encodeURIComponent(item.lon)}&recordDate=${encodeURIComponent(item.recordDate)}`;
+        const res = await fetch(url);
+        const text = await res.text();
+
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error("GAS側の新バージョンデプロイを確認してください");
+        }
+
+        if (data.success) {
+          allUserRecords = allUserRecords.filter(r => r._uid !== uid);
+          applyHistoryFilter(false);
+          statusEl.style.color = "#c62828";
+          statusEl.innerText = `🗑️ 削除完了！ [${item.manageId}]`;
+        } else {
+          statusEl.style.color = "#c62828";
+          statusEl.innerText = `❌ 削除失敗: ${data.msg}`;
+          alert("削除に失敗しました:\n" + data.msg);
+        }
+      } catch (err) {
+        statusEl.style.color = "#c62828";
+        statusEl.innerText = `❌ 通信エラー: ${err.message}`;
+        alert("削除通信エラー:\n" + err.message);
+      } finally {
+        setTimeout(() => { statusEl.style.color = "#546e7a"; }, 4000);
+      }
+    };
+
     function addHistoryMarker(item, autoOpen = false) {
       const lat = Number(item.lat);
       const lon = Number(item.lon);
       const coordStr = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+      const safeId = escapeHtml(item.manageId);
+      const safeDate = escapeHtml(item.recordDate);
 
       const marker = L.circleMarker([lat, lon], {
         radius: 9,
@@ -783,7 +831,7 @@
         fillOpacity: 1
       });
 
-      marker.bindTooltip(item.manageId, {
+      marker.bindTooltip(safeId, {
         permanent: true,
         direction: "top",
         offset: [0, -10],
@@ -791,12 +839,13 @@
       });
 
       marker.bindPopup(`
-        <div style="font-size:13px; line-height:1.45; min-width:160px;">
-          <b>📌 ${item.manageId}</b><br>
-          <span style="color:#555;">🕒 ${item.recordDate}</span><br>
+        <div style="font-size:13px; line-height:1.45; min-width:170px;">
+          <b>📌 ${safeId}</b><br>
+          <span style="color:#555;">🕒 ${safeDate}</span><br>
           <span style="font-family:monospace;">${coordStr}</span>
           <button class="popup-btn" onclick="focusOnPin(${lat}, ${lon})">🎯 ここに照準を合わせる</button>
           <button class="popup-btn" style="background:#2e7d32;" onclick="copyPinCoord('${coordStr}')">📋 この座標をコピー</button>
+          <button class="popup-btn popup-btn-del" onclick="deletePinRecord(${item._uid})">🗑️ この記録を削除</button>
         </div>
       `);
 
@@ -805,7 +854,6 @@
       return marker;
     }
 
-    // ★ スプレッドシートから本人の全履歴を1回取得してキャッシュ
     async function fetchAllUserRecords(fitBoundsAfterLoad = false) {
       const author = localStorage.getItem("pin_auth_id");
       const statusEl = document.getElementById("last-copied");
@@ -823,14 +871,16 @@
           return;
         }
 
-        allUserRecords = data.items || [];
+        allUserRecords = (data.items || []).map(item => ({
+          ...item,
+          _uid: ++recordUidCounter
+        }));
         applyHistoryFilter(fitBoundsAfterLoad);
       } catch (err) {
         statusEl.innerText = "⚠️ 履歴の通信エラーが発生しました";
       }
     }
 
-    // プルダウン変更時のハンドラ
     function onPeriodSelectChange() {
       const val = document.getElementById("history-select").value;
       if (val !== "custom_date") {
@@ -841,20 +891,19 @@
       applyHistoryFilter(true);
     }
 
-    // ★ キャッシュ済みデータから現在の選択条件でピンを即座にフィルタ描画
     function applyHistoryFilter(fitBoundsAfterLoad = true) {
       const period = document.getElementById("history-select").value;
       const statusEl = document.getElementById("last-copied");
       const author = localStorage.getItem("pin_auth_id") || "";
 
       historyLayer.clearLayers();
+      currentVisibleRecords = [];
 
       if (period === "none") {
         statusEl.innerText = "履歴ピンを非表示にしました";
         return;
       }
 
-      // 日本時間基準の境界を計算
       const todayKey = getJstTodayKey(0);
       const yesterdayKey = getJstTodayKey(-1);
       const now = new Date();
@@ -883,6 +932,8 @@
         return false;
       });
 
+      currentVisibleRecords = filtered;
+
       if (filtered.length === 0) {
         const label = period === "custom_date" ? `${selectedDateKey.replace(/-/g, '/')} の` : "該当期間の";
         statusEl.innerText = `${label}登録データはありません（0件）`;
@@ -908,10 +959,72 @@
     }
 
     // =========================================================================
+    // 📊 Excel(.xlsx) エクスポート機能（今見えているピンをそのまま出力）
+    // =========================================================================
+    function exportVisiblePinsToExcel() {
+      if (typeof XLSX === "undefined") {
+        alert("Excel出力ライブラリの読み込み中です。数秒待ってからもう一度お試しください。");
+        return;
+      }
+
+      const period = document.getElementById("history-select").value;
+      if (period === "none" || currentVisibleRecords.length === 0) {
+        alert("出力できるピンが地図に表示されていません。\n右上の「履歴」から表示したい期間や日付を選択してください。");
+        return;
+      }
+
+      const author = localStorage.getItem("pin_auth_id") || "user";
+      const statusEl = document.getElementById("last-copied");
+
+      // 選択中の期間ラベルをファイル名用に整形
+      const periodNameMap = {
+        today: "本日",
+        yesterday: "昨日",
+        "1week": "過去1週間",
+        "1month": "過去1か月",
+        "3months": "過去3か月",
+        "1year": "過去1年",
+        all: "全期間",
+        custom_date: selectedDateKey || "日付指定"
+      };
+      const periodTag = (periodNameMap[period] || "履歴").replace(/[\\/:*?"<>|]/g, "-");
+      const todayCompact = getJstTodayKey(0).replace(/-/g, "");
+
+      // スプレッドシート「記録シート」と同一の5列構成で作成
+      const sheetRows = currentVisibleRecords.map(item => ({
+        "管理番号": item.manageId,
+        "緯度": Number(Number(item.lat).toFixed(6)),
+        "経度": Number(Number(item.lon).toFixed(6)),
+        "作成者": author,
+        "記録日": item.recordDate
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(sheetRows);
+
+      // 見やすいように列幅を自動調整
+      ws["!cols"] = [
+        { wch: 20 }, // 管理番号
+        { wch: 13 }, // 緯度
+        { wch: 14 }, // 経度
+        { wch: 14 }, // 作成者
+        { wch: 20 }  // 記録日
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "記録シート");
+
+      const fileName = `現場座標_${author}_${periodTag}_${todayCompact}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      statusEl.style.color = "#00695c";
+      statusEl.innerText = `📊 Excel出力完了！（${sheetRows.length}件: ${fileName}）`;
+      setTimeout(() => { statusEl.style.color = "#546e7a"; }, 4500);
+    }
+
+    // =========================================================================
     // 📅 色付きカレンダー機能ロジック
     // =========================================================================
     function openCalendar() {
-      // 選択中の日付があればその月、なければ最新の記録がある月、なければ今月を開く
       if (selectedDateKey) {
         const parts = selectedDateKey.split("-");
         calViewYear = Number(parts[0]);
@@ -957,7 +1070,6 @@
     function renderCalendar() {
       document.getElementById("cal-month-title").innerText = `${calViewYear}年 ${calViewMonth + 1}月`;
 
-      // 日付ごとの件数を集計 { "2026-11-20": 3, ... }
       const countMap = {};
       allUserRecords.forEach(item => {
         if (item.dateKey) {
@@ -968,19 +1080,17 @@
       const grid = document.getElementById("cal-grid");
       grid.innerHTML = "";
 
-      const firstDayOfWeek = new Date(calViewYear, calViewMonth, 1).getDay(); // 0(日)-6(土)
+      const firstDayOfWeek = new Date(calViewYear, calViewMonth, 1).getDay();
       const daysInMonth = new Date(calViewYear, calViewMonth + 1, 0).getDate();
       const todayKey = getJstTodayKey(0);
       let monthTotalCount = 0;
 
-      // 1日までの空白セル
       for (let i = 0; i < firstDayOfWeek; i++) {
         const emptyDiv = document.createElement("div");
         emptyDiv.className = "cal-cell empty";
         grid.appendChild(emptyDiv);
       }
 
-      // 各日のセル生成
       for (let d = 1; d <= daysInMonth; d++) {
         const mStr = String(calViewMonth + 1).padStart(2, '0');
         const dStr = String(d).padStart(2, '0');
@@ -1069,6 +1179,7 @@
 
         if (data.success) {
           const newItem = {
+            _uid: ++recordUidCounter,
             manageId: manageId,
             lat: parseFloat(lat),
             lon: parseFloat(lon),
@@ -1077,10 +1188,10 @@
             timestamp: data.timestamp || Date.now()
           };
 
-          // キャッシュに追加（次にカレンダーを開いた時にすぐ色が付くようにする）
           allUserRecords.push(newItem);
 
           if (document.getElementById("history-select").value !== "none") {
+            currentVisibleRecords.push(newItem);
             addHistoryMarker(newItem, true);
           }
 
