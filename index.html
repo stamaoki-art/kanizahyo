@@ -554,11 +554,8 @@
 
   <script>
     // =========================================================================
-    // 💡【重要1】ログイン管理用スプレッドシートのGAS URL
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbykbAEEHsAplk7ByKg_p78qEUE5G1H6Og1PMNdvvBZXMq6LYdG0R221VRslT6iAfSf-2g/exec";
-
-    // 💡【重要2】記録シート用スプレッドシートのGAS URL（ログイン用とは別のURL！）
-    const RECORD_GAS_URL = "https://script.google.com/macros/s/AKfycbxLhawuaP_-7XLcaKZWzw2tp_52Gp-QkwlYNLdVdnrfM-oF_hUPAXojIOp9AcMOOMW_Rg/exec";
+    // 💡【重要】統合したスプレッドシートのGAS URL（この1本だけで全機能動きます！）
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyK0Jza_mSHK1_ibjEa4Dwxp30qJpO2weQ9bqc7Di1i15SJkEmd_Dh1ur6YXYsb1-JHLw/exec";
     // =========================================================================
 
     let allUserRecords = [];
@@ -567,21 +564,6 @@
     let selectedDateKey = "";
     let calViewYear = new Date().getFullYear();
     let calViewMonth = new Date().getMonth();
-
-    // 記録用GAS URLの事前診断チェック
-    function validateRecordGasUrl() {
-      const url = (RECORD_GAS_URL || "").trim();
-      if (!url || url.includes("YYYYY") || url.includes("XXXXX")) {
-        return "⚠️ HTML内の RECORD_GAS_URL がサンプル(YYYYY)のままです！記録用GASのURLに書き換えてください。";
-      }
-      if (url === (GAS_URL || "").trim()) {
-        return "⚠️ RECORD_GAS_URL にログイン用と同じURLが入っています！記録シート側のURLを貼ってください。";
-      }
-      if (url.endsWith("/dev")) {
-        return "⚠️ RECORD_GAS_URL がテスト用(/dev)です！本番デプロイ(/exec)のURLを貼ってください。";
-      }
-      return null;
-    }
 
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
@@ -610,7 +592,7 @@
       msg.innerText = "";
 
       try {
-        const url = `${GAS_URL}?id=${encodeURIComponent(id)}&pass=${encodeURIComponent(pass)}`;
+        const url = `${GAS_URL.trim()}?action=login&id=${encodeURIComponent(id)}&pass=${encodeURIComponent(pass)}`;
         const res = await fetch(url);
         const text = await res.text();
         
@@ -784,10 +766,8 @@
       }
     };
 
+    // ★ ピン削除処理
     window.deletePinRecord = async function(uid) {
-      const urlErr = validateRecordGasUrl();
-      if (urlErr) { alert(urlErr); return; }
-
       const item = allUserRecords.find(r => r._uid === uid);
       if (!item) return;
 
@@ -802,7 +782,7 @@
       statusEl.innerText = `⏳ 「${item.manageId}」を削除中...`;
 
       try {
-        const url = `${RECORD_GAS_URL.trim()}?action=delete&author=${encodeURIComponent(author)}&manageId=${encodeURIComponent(item.manageId)}&lat=${encodeURIComponent(item.lat)}&lon=${encodeURIComponent(item.lon)}&recordDate=${encodeURIComponent(item.recordDate)}`;
+        const url = `${GAS_URL.trim()}?action=delete&author=${encodeURIComponent(author)}&manageId=${encodeURIComponent(item.manageId)}&lat=${encodeURIComponent(item.lat)}&lon=${encodeURIComponent(item.lon)}&recordDate=${encodeURIComponent(item.recordDate)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -810,7 +790,7 @@
         try {
           data = JSON.parse(text);
         } catch (e) {
-          throw new Error("記録用GASのアクセス権を「全員」にして新バージョンでデプロイしてください");
+          throw new Error("GASの新バージョンデプロイを確認してください");
         }
 
         if (data.success) {
@@ -875,17 +855,10 @@
       const statusEl = document.getElementById("last-copied");
       if (!author) return;
 
-      const urlErr = validateRecordGasUrl();
-      if (urlErr) {
-        statusEl.style.color = "#c62828";
-        statusEl.innerText = urlErr;
-        return;
-      }
-
       statusEl.innerText = "📡 登録履歴を読み込み中...";
 
       try {
-        const url = `${RECORD_GAS_URL.trim()}?action=get_history&author=${encodeURIComponent(author)}`;
+        const url = `${GAS_URL.trim()}?action=get_history&author=${encodeURIComponent(author)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -894,7 +867,7 @@
           data = JSON.parse(text);
         } catch (e) {
           statusEl.style.color = "#c62828";
-          statusEl.innerText = "⚠️ 記録用GASがブロックされました（アクセス権を「全員」にしてください）";
+          statusEl.innerText = "⚠️ GASがブロックされました（アクセス権を「全員」にしてください）";
           return;
         }
 
@@ -912,7 +885,7 @@
         applyHistoryFilter(fitBoundsAfterLoad);
       } catch (err) {
         statusEl.style.color = "#c62828";
-        statusEl.innerText = `⚠️ 履歴通信エラー: ${err.message}（RECORD_GAS_URLを確認）`;
+        statusEl.innerText = `⚠️ 履歴通信エラー: ${err.message}`;
       }
     }
 
@@ -1177,12 +1150,6 @@
     // 💾 新規登録処理
     // =========================================================================
     async function registerSpot() {
-      const urlErr = validateRecordGasUrl();
-      if (urlErr) {
-        alert(urlErr);
-        return;
-      }
-
       const inputEl = document.getElementById("manage-id-input");
       const btnEl = document.getElementById("register-btn");
       const statusEl = document.getElementById("last-copied");
@@ -1204,7 +1171,7 @@
       statusEl.innerText = `📡 「${manageId}」をスプレッドシートへ記録中...`;
 
       try {
-        const url = `${RECORD_GAS_URL.trim()}?action=register&manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
+        const url = `${GAS_URL.trim()}?action=register&manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -1212,7 +1179,7 @@
         try {
           data = JSON.parse(text);
         } catch (e) {
-          throw new Error("記録用GASのアクセス権を「全員」にしてデプロイしてください");
+          throw new Error("GASの新バージョンデプロイを確認してください");
         }
 
         if (data.success) {
