@@ -422,7 +422,6 @@
     #register-btn:active { transform: scale(0.97); background: #0d47a1; }
     #register-btn:disabled { background: #90caf9; cursor: not-allowed; }
 
-    /* サブアクション行（座標コピー・地番図・Excel出力の3ボタン） */
     .action-row { display: flex; gap: 6px; }
     .sub-btn {
       flex: 1;
@@ -451,6 +450,7 @@
       text-align: center;
       min-height: 16px;
       font-weight: bold;
+      word-break: break-all;
     }
 
     .popup-btn {
@@ -557,16 +557,31 @@
     // 💡【重要1】ログイン管理用スプレッドシートのGAS URL
     const GAS_URL = "https://script.google.com/macros/s/AKfycbykbAEEHsAplk7ByKg_p78qEUE5G1H6Og1PMNdvvBZXMq6LYdG0R221VRslT6iAfSf-2g/exec";
 
-    // 💡【重要2】記録シート用スプレッドシートのGAS URL
+    // 💡【重要2】記録シート用スプレッドシートのGAS URL（ログイン用とは別のURL！）
     const RECORD_GAS_URL = "https://script.google.com/macros/s/AKfycbxgsoY1igxXtwr-XV1Weylv_VG2LAvokl96ezDayB3Zfpq-3QrHr3gBmbLoPdXj9ORqxw/exec";
     // =========================================================================
 
     let allUserRecords = [];
-    let currentVisibleRecords = []; // 今地図に表示されているピン一覧
+    let currentVisibleRecords = [];
     let recordUidCounter = 0;
     let selectedDateKey = "";
     let calViewYear = new Date().getFullYear();
     let calViewMonth = new Date().getMonth();
+
+    // 記録用GAS URLの事前診断チェック
+    function validateRecordGasUrl() {
+      const url = (RECORD_GAS_URL || "").trim();
+      if (!url || url.includes("YYYYY") || url.includes("XXXXX")) {
+        return "⚠️ HTML内の RECORD_GAS_URL がサンプル(YYYYY)のままです！記録用GASのURLに書き換えてください。";
+      }
+      if (url === (GAS_URL || "").trim()) {
+        return "⚠️ RECORD_GAS_URL にログイン用と同じURLが入っています！記録シート側のURLを貼ってください。";
+      }
+      if (url.endsWith("/dev")) {
+        return "⚠️ RECORD_GAS_URL がテスト用(/dev)です！本番デプロイ(/exec)のURLを貼ってください。";
+      }
+      return null;
+    }
 
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
@@ -754,7 +769,6 @@
         .replace(/"/g, "&quot;");
     }
 
-    // ピン用ユーティリティ
     window.focusOnPin = function(lat, lon) {
       map.setView([lat, lon], 19);
       map.closePopup();
@@ -770,8 +784,10 @@
       }
     };
 
-    // ★ ピン削除処理
     window.deletePinRecord = async function(uid) {
+      const urlErr = validateRecordGasUrl();
+      if (urlErr) { alert(urlErr); return; }
+
       const item = allUserRecords.find(r => r._uid === uid);
       if (!item) return;
 
@@ -786,7 +802,7 @@
       statusEl.innerText = `⏳ 「${item.manageId}」を削除中...`;
 
       try {
-        const url = `${RECORD_GAS_URL}?action=delete&author=${encodeURIComponent(author)}&manageId=${encodeURIComponent(item.manageId)}&lat=${encodeURIComponent(item.lat)}&lon=${encodeURIComponent(item.lon)}&recordDate=${encodeURIComponent(item.recordDate)}`;
+        const url = `${RECORD_GAS_URL.trim()}?action=delete&author=${encodeURIComponent(author)}&manageId=${encodeURIComponent(item.manageId)}&lat=${encodeURIComponent(item.lat)}&lon=${encodeURIComponent(item.lon)}&recordDate=${encodeURIComponent(item.recordDate)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -794,7 +810,7 @@
         try {
           data = JSON.parse(text);
         } catch (e) {
-          throw new Error("GAS側の新バージョンデプロイを確認してください");
+          throw new Error("記録用GASのアクセス権を「全員」にして新バージョンでデプロイしてください");
         }
 
         if (data.success) {
@@ -809,10 +825,10 @@
         }
       } catch (err) {
         statusEl.style.color = "#c62828";
-        statusEl.innerText = `❌ 通信エラー: ${err.message}`;
+        statusEl.innerText = `❌ 削除通信エラー: ${err.message}`;
         alert("削除通信エラー:\n" + err.message);
       } finally {
-        setTimeout(() => { statusEl.style.color = "#546e7a"; }, 4000);
+        setTimeout(() => { statusEl.style.color = "#546e7a"; }, 5000);
       }
     };
 
@@ -859,25 +875,44 @@
       const statusEl = document.getElementById("last-copied");
       if (!author) return;
 
+      const urlErr = validateRecordGasUrl();
+      if (urlErr) {
+        statusEl.style.color = "#c62828";
+        statusEl.innerText = urlErr;
+        return;
+      }
+
       statusEl.innerText = "📡 登録履歴を読み込み中...";
 
       try {
-        const url = `${RECORD_GAS_URL}?action=get_history&author=${encodeURIComponent(author)}`;
+        const url = `${RECORD_GAS_URL.trim()}?action=get_history&author=${encodeURIComponent(author)}`;
         const res = await fetch(url);
-        const data = await res.json();
+        const text = await res.text();
+
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          statusEl.style.color = "#c62828";
+          statusEl.innerText = "⚠️ 記録用GASがブロックされました（アクセス権を「全員」にしてください）";
+          return;
+        }
 
         if (!data.success) {
+          statusEl.style.color = "#c62828";
           statusEl.innerText = `⚠️ 履歴取得失敗: ${data.msg}`;
           return;
         }
 
+        statusEl.style.color = "#546e7a";
         allUserRecords = (data.items || []).map(item => ({
           ...item,
           _uid: ++recordUidCounter
         }));
         applyHistoryFilter(fitBoundsAfterLoad);
       } catch (err) {
-        statusEl.innerText = "⚠️ 履歴の通信エラーが発生しました";
+        statusEl.style.color = "#c62828";
+        statusEl.innerText = `⚠️ 履歴通信エラー: ${err.message}（RECORD_GAS_URLを確認）`;
       }
     }
 
@@ -959,7 +994,7 @@
     }
 
     // =========================================================================
-    // 📊 Excel(.xlsx) エクスポート機能（今見えているピンをそのまま出力）
+    // 📊 Excel(.xlsx) エクスポート機能
     // =========================================================================
     function exportVisiblePinsToExcel() {
       if (typeof XLSX === "undefined") {
@@ -976,7 +1011,6 @@
       const author = localStorage.getItem("pin_auth_id") || "user";
       const statusEl = document.getElementById("last-copied");
 
-      // 選択中の期間ラベルをファイル名用に整形
       const periodNameMap = {
         today: "本日",
         yesterday: "昨日",
@@ -990,7 +1024,6 @@
       const periodTag = (periodNameMap[period] || "履歴").replace(/[\\/:*?"<>|]/g, "-");
       const todayCompact = getJstTodayKey(0).replace(/-/g, "");
 
-      // スプレッドシート「記録シート」と同一の5列構成で作成
       const sheetRows = currentVisibleRecords.map(item => ({
         "管理番号": item.manageId,
         "緯度": Number(Number(item.lat).toFixed(6)),
@@ -1002,13 +1035,12 @@
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(sheetRows);
 
-      // 見やすいように列幅を自動調整
       ws["!cols"] = [
-        { wch: 20 }, // 管理番号
-        { wch: 13 }, // 緯度
-        { wch: 14 }, // 経度
-        { wch: 14 }, // 作成者
-        { wch: 20 }  // 記録日
+        { wch: 20 },
+        { wch: 13 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 20 }
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, "記録シート");
@@ -1145,6 +1177,12 @@
     // 💾 新規登録処理
     // =========================================================================
     async function registerSpot() {
+      const urlErr = validateRecordGasUrl();
+      if (urlErr) {
+        alert(urlErr);
+        return;
+      }
+
       const inputEl = document.getElementById("manage-id-input");
       const btnEl = document.getElementById("register-btn");
       const statusEl = document.getElementById("last-copied");
@@ -1166,7 +1204,7 @@
       statusEl.innerText = `📡 「${manageId}」をスプレッドシートへ記録中...`;
 
       try {
-        const url = `${RECORD_GAS_URL}?action=register&manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
+        const url = `${RECORD_GAS_URL.trim()}?action=register&manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -1174,7 +1212,7 @@
         try {
           data = JSON.parse(text);
         } catch (e) {
-          throw new Error("Google側でブロックされました（RECORD_GAS_URLの確認）");
+          throw new Error("記録用GASのアクセス権を「全員」にしてデプロイしてください");
         }
 
         if (data.success) {
@@ -1206,12 +1244,12 @@
         }
       } catch (err) {
         statusEl.style.color = "#c62828";
-        statusEl.innerText = `❌ 通信エラー: ${err.message}`;
+        statusEl.innerText = `❌ 登録通信エラー: ${err.message}`;
         alert("通信エラーが発生しました:\n" + err.message);
       } finally {
         btnEl.disabled = false;
         btnEl.innerText = "💾 登録";
-        setTimeout(() => { statusEl.style.color = "#546e7a"; }, 4000);
+        setTimeout(() => { statusEl.style.color = "#546e7a"; }, 5000);
       }
     }
 
