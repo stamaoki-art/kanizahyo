@@ -249,8 +249,8 @@
   <!-- 上部バー -->
   <div id="top-bar">
     <div class="search-row">
-      <input type="text" id="search-input" placeholder="🔍 住所・施設名で移動">
-      <button id="search-btn" onclick="searchAddress()">検索</button>
+      <input type="text" id="search-input" placeholder="🔍 住所 または 緯度,経度 (例: 35.68, 139.76)">
+      <button id="search-btn" onclick="handleSearch()">検索</button>
     </div>
     <div id="coord-display">35.681236, 139.767125</div>
   </div>
@@ -350,7 +350,7 @@
       if (e.key === "Enter") attemptLogin(false);
     });
 
-    // --- 🗺️ 地図・高精度GPS・座標コピーロジック ---
+    // --- 🗺️ 地図・高精度GPS・座標検索・コピーロジック ---
     let initLat = 35.681236;
     let initLon = 139.767125;
     let initZoom = 17;
@@ -408,6 +408,7 @@
 
     let myLocMarker = null;
     let myLocCircle = null;
+    let searchMarker = null;
     let currentCoordText = "";
     let gpsWatchId = null;
     let gpsStopTimer = null;
@@ -431,7 +432,6 @@
       } catch(e) {}
     });
 
-    // ★ 測位中にユーザーが手動で地図を動かしたら自動追尾を即解除
     map.on('dragstart', () => {
       if (gpsWatchId !== null) {
         stopGpsWatch("✋ 手動調整モードに切り替えました");
@@ -500,7 +500,6 @@
       }
     }
 
-    // ★ 高精度GPS連続追い込み測位
     function jumpToCurrentLocation() {
       const status = document.getElementById('last-copied');
       if (!navigator.geolocation) {
@@ -508,7 +507,6 @@
         return;
       }
 
-      // すでに測位中なら一旦リセット
       stopGpsWatch();
       if (gpsBtnEl) gpsBtnEl.classList.add('tracking');
       status.innerText = "🛰️ GPS衛星を捕捉中...（最大10秒間絞り込み）";
@@ -523,18 +521,14 @@
           const acc = pos.coords.accuracy;
           latestAcc = Math.round(acc);
 
-          // より精度が高い（誤差が小さい）データが来たら地図とマーカーを更新
           if (acc <= bestAccuracy) {
             bestAccuracy = acc;
-
-            // 精度に応じてズーム倍率を自動調整（誤差15m以内なら超拡大ズーム19）
             const targetZoom = acc <= 15 ? 19 : 18;
             map.setView([lat, lon], targetZoom);
 
             if (myLocMarker) map.removeLayer(myLocMarker);
             if (myLocCircle) map.removeLayer(myLocCircle);
 
-            // 誤差範囲を示す半透明サークル
             myLocCircle = L.circle([lat, lon], {
               radius: acc,
               color: "#0288d1",
@@ -543,7 +537,6 @@
               fillOpacity: 0.18
             }).addTo(map);
 
-            // 現在地中心ドット
             myLocMarker = L.circleMarker([lat, lon], {
               radius: 8,
               fillColor: "#0288d1",
@@ -552,7 +545,6 @@
               fillOpacity: 1
             }).bindPopup(`📍 現在地（誤差約${latestAcc}m）`).addTo(map);
 
-            // 誤差6m以下に達したら十分な精度なので即座にロック確定
             if (acc <= 6) {
               stopGpsWatch(`🎯 高精度ロック完了！（誤差約${latestAcc}m）`);
             } else {
@@ -571,7 +563,6 @@
         }
       );
 
-      // 10秒経過したら、その時点のベスト精度で確定してバッテリー消費を止める
       gpsStopTimer = setTimeout(() => {
         if (gpsWatchId !== null) {
           const finalMsg = latestAcc !== null
@@ -582,22 +573,87 @@
       }, 10000);
     }
 
-    // 住所検索
-    async function searchAddress() {
+    // ★ 入力文字列から座標を抽出するパーサー（全角・逆順・URL貼付対応）
+    function parseSearchCoord(rawInput) {
+      const normalized = rawInput
+        .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+        .replace(/．/g, '.')
+        .replace(/，/g, ',')
+        .replace(/－/g, '-')
+        .replace(/ /g, ' ')
+        .trim();
+
+      // 住所の番地「1-2-3」と誤認しないよう、小数点を含む数値を2つ抽出
+      const matches = normalized.match(/[-+]?\d+\.\d+/g);
+      if (matches && matches.length >= 2) {
+        let n1 = parseFloat(matches[0]);
+        let n2 = parseFloat(matches[1]);
+
+        // 日本付近の経度・緯度逆転自動補正 (経度120~155, 緯度20~50)
+        if (n1 >= 120 && n1 <= 155 && n2 >= 20 && n2 <= 50) {
+          return { lat: n2, lon: n1 };
+        }
+        if (Math.abs(n1) <= 90 && Math.abs(n2) <= 180) {
+          return { lat: n1, lon: n2 };
+        }
+      }
+      return null;
+    }
+
+    // ★ ハイブリッド検索（座標なら即ジャンプ、文字なら住所検索）
+    async function handleSearch() {
       const q = document.getElementById('search-input').value.trim();
       if (!q) return;
+
+      stopGpsWatch();
       const status = document.getElementById('last-copied');
-      status.innerText = "🔍 検索中...";
+
+      // 1. まず座標入力かどうかチェック
+      const coord = parseSearchCoord(q);
+      if (coord) {
+        map.setView([coord.lat, coord.lon], 19);
+
+        if (searchMarker) map.removeLayer(searchMarker);
+        searchMarker = L.circleMarker([coord.lat, coord.lon], {
+          radius: 9,
+          fillColor: "#ef6c00",
+          color: "#ffffff",
+          weight: 3,
+          fillOpacity: 1
+        }).bindPopup(`📌 検索座標<br>${coord.lat.toFixed(6)}, ${coord.lon.toFixed(6)}`).addTo(map).openPopup();
+
+        status.innerText = `📌 座標へ移動しました: ${coord.lat.toFixed(6)}, ${coord.lon.toFixed(6)}`;
+        document.getElementById('search-input').blur(); // スマホのキーボードを閉じる
+        return;
+      }
+
+      // 2. 座標でなければ国土地理院APIで住所・施設名検索
+      status.innerText = "🔍 住所検索中...";
       try {
         const res = await fetch(`https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`);
         const data = await res.json();
         if (data && data.length > 0 && data[0].geometry) {
           const coords = data[0].geometry.coordinates;
-          map.setView([coords[1], coords[0]], 18);
-          status.innerText = `移動完了: ${data[0].properties.title || q}`;
+          const lat = coords[1];
+          const lon = coords[0];
+          const title = data[0].properties.title || q;
+
+          map.setView([lat, lon], 18);
+
+          if (searchMarker) map.removeLayer(searchMarker);
+          searchMarker = L.circleMarker([lat, lon], {
+            radius: 9,
+            fillColor: "#ef6c00",
+            color: "#ffffff",
+            weight: 3,
+            fillOpacity: 1
+          }).bindPopup(`📌 ${title}`).addTo(map).openPopup();
+
+          status.innerText = `移動完了: ${title}`;
+          document.getElementById('search-input').blur();
         } else {
-          status.innerText = "住所が見つかりませんでした";
-          alert("住所が見つかりませんでした。");
+          status.innerText = "住所・施設が見つかりませんでした";
+          alert("住所・施設が見つかりませんでした。");
         }
       } catch(e) {
         status.innerText = "検索エラーが発生しました";
@@ -605,7 +661,7 @@
     }
 
     document.getElementById('search-input').addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') searchAddress();
+      if (e.key === 'Enter') handleSearch();
     });
   </script>
 </body>
