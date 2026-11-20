@@ -308,20 +308,15 @@
       border-color: #a5d6a7;
     }
 
-    /* ★ 2画面分割対応メインエリア */
+    /* ★ 常に左右2分割（スマホ縦画面でも横並び） */
     #main-split {
       flex: 1;
       display: flex;
-      flex-direction: row; /* PC・横画面は左右分割 */
+      flex-direction: row;
       width: 100%;
       height: 100%;
       overflow: hidden;
       position: relative;
-    }
-    @media (max-width: 768px) {
-      #main-split {
-        flex-direction: column; /* スマホ縦画面は上下分割 */
-      }
     }
 
     #map-container {
@@ -334,7 +329,7 @@
     }
     #map { width: 100%; height: 100%; }
 
-    /* ★ 地番図分割パネル */
+    /* ★ 地番図分割パネル（右側に配置） */
     #chiban-pane {
       display: none;
       flex: 1;
@@ -345,39 +340,47 @@
       min-height: 0;
       z-index: 1000;
     }
-    @media (max-width: 768px) {
-      #chiban-pane {
-        border-left: none;
-        border-top: 3px solid #ef6c00;
-      }
-    }
     .chiban-header {
       background: #ef6c00;
       color: white;
-      padding: 5px 8px;
+      padding: 5px 6px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: 4px;
       font-size: 12px;
       font-weight: bold;
     }
+    .chiban-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .chiban-actions {
       display: flex;
-      gap: 4px;
+      gap: 3px;
+      flex-shrink: 0;
     }
     .chiban-mini-btn {
       background: rgba(0, 0, 0, 0.25);
       color: white;
       border: 1px solid rgba(255,255,255,0.4);
       border-radius: 4px;
-      padding: 3px 7px;
+      padding: 3px 6px;
       font-size: 11px;
       font-weight: bold;
       cursor: pointer;
       white-space: nowrap;
     }
     .chiban-mini-btn:active { background: rgba(0, 0, 0, 0.45); }
+
+    /* スマホ幅では地番図ヘッダーをスリム表示にしてボタン切れを防止 */
+    @media (max-width: 600px) {
+      .chiban-sub { display: none; }
+      .chiban-header { font-size: 11px; padding: 4px 5px; }
+      .chiban-mini-btn { padding: 3px 5px; font-size: 10px; }
+    }
+
     #chiban-frame {
       flex: 1;
       width: 100%;
@@ -419,14 +422,14 @@
     /* 大型GPSボタン */
     .gps-btn {
       background: white;
-      width: 52px;
-      height: 52px;
+      width: 50px;
+      height: 50px;
       border-radius: 50%;
       box-shadow: 0 3px 8px rgba(0,0,0,0.4);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 25px;
+      font-size: 24px;
       cursor: pointer;
       border: 2px solid #1565c0;
       user-select: none;
@@ -607,7 +610,7 @@
     </div>
   </div>
 
-  <!-- ★ 2画面分割エリア（左/上：航空写真、右/下：地番図） -->
+  <!-- ★ 左右2画面分割エリア（左：航空写真、右：地番図） -->
   <div id="main-split">
     <div id="map-container">
       <div id="map"></div>
@@ -616,11 +619,11 @@
 
     <div id="chiban-pane">
       <div class="chiban-header">
-        <span>🗺️ 地番図（航空写真と連動中）</span>
+        <span class="chiban-title">🗺️ 地番図<span class="chiban-sub">（連動中）</span></span>
         <div class="chiban-actions">
-          <button class="chiban-mini-btn" onclick="syncChibanFrame(true)" title="現在の航空写真の中心座標へ強制再同期">🔄 再同期</button>
+          <button class="chiban-mini-btn" onclick="syncChibanFrame(true)" title="現在の航空写真の中心座標へ強制再同期">🔄 同期</button>
           <button class="chiban-mini-btn" onclick="openChibanNewTab()" title="新しいタブで全画面表示">↗ 別タブ</button>
-          <button class="chiban-mini-btn" onclick="toggleChibanSplit()">✕ 閉じる</button>
+          <button class="chiban-mini-btn" onclick="toggleChibanSplit()" title="地番図を閉じる">✕</button>
         </div>
       </div>
       <iframe id="chiban-frame" src="about:blank" loading="lazy"></iframe>
@@ -830,7 +833,7 @@
     updateCenterDisplay();
 
     // =========================================================================
-    // 🗺️ 地番図 2画面分割 ＆ 位置同期ロジック
+    // 🗺️ 地番図 左右2画面分割 ＆ 位置同期ロジック
     // =========================================================================
     function buildChibanUrl() {
       const c = map.getCenter();
@@ -850,7 +853,7 @@
         btn.classList.add('active');
         btn.innerText = '🗺️ 地番図閉じる';
         syncChibanFrame(false);
-        status.innerText = '🗺️ 2画面比較モード（航空写真を動かすと地番図も追従します）';
+        status.innerText = '🗺️ 左右比較モード（左を動かすと右の地番図も追従します）';
       } else {
         pane.style.display = 'none';
         btn.classList.remove('active');
