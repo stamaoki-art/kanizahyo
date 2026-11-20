@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>📍 撮影地点 登録＆緯度経度コピー</title>
+  <title>📍 撮影地点 登録＆履歴マップ</title>
 
   <!-- Leaflet 地図ライブラリ -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -80,7 +80,7 @@
       word-break: break-all;
     }
 
-    /* 上部検索＆座標表示バー */
+    /* 上部検索＆座標＆履歴バー */
     #top-bar {
       background: #1565c0;
       color: white;
@@ -112,17 +112,36 @@
     }
     #search-btn:active { background: #002171; }
 
+    /* 座標ディスプレイ ＆ 履歴期間セレクタ横並び */
+    .status-row {
+      display: flex;
+      gap: 6px;
+      align-items: stretch;
+    }
     #coord-display {
+      flex: 1;
       background: rgba(0, 0, 0, 0.35);
       border-radius: 6px;
-      padding: 5px 10px;
+      padding: 6px 8px;
       text-align: center;
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: bold;
-      letter-spacing: 0.5px;
       color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       user-select: all;
+    }
+    #history-select {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.4);
+      background: #0d47a1;
+      color: white;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
     }
 
     #map-container { flex: 1; position: relative; width: 100%; height: 100%; }
@@ -185,6 +204,19 @@
       100% { box-shadow: 0 0 0 0 rgba(239, 108, 0, 0); }
     }
 
+    /* 登録済みピン用ラベルバッジ */
+    .history-label {
+      background: rgba(27, 94, 32, 0.9);
+      color: white;
+      border: 1px solid white;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+      font-weight: bold;
+      white-space: nowrap;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+
     /* 下部アクションパネル */
     #bottom-bar {
       background: white;
@@ -196,11 +228,7 @@
       gap: 7px;
     }
 
-    /* ★ 新機能：管理番号入力＆登録行 */
-    .register-row {
-      display: flex;
-      gap: 6px;
-    }
+    .register-row { display: flex; gap: 6px; }
     #manage-id-input {
       flex: 1;
       padding: 10px 12px;
@@ -230,7 +258,6 @@
     #register-btn:active { transform: scale(0.97); background: #0d47a1; }
     #register-btn:disabled { background: #90caf9; cursor: not-allowed; }
 
-    /* サブアクション行（コピー＆地番図） */
     .action-row { display: flex; gap: 8px; }
     #copy-btn {
       flex: 3;
@@ -267,6 +294,20 @@
       min-height: 16px;
       font-weight: bold;
     }
+
+    /* ポップアップ内ミニボタン */
+    .popup-btn {
+      margin-top: 6px;
+      padding: 5px 8px;
+      border: none;
+      border-radius: 4px;
+      background: #1565c0;
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -288,7 +329,19 @@
       <input type="text" id="search-input" placeholder="🔍 住所 または 緯度,経度">
       <button id="search-btn" onclick="handleSearch()">検索</button>
     </div>
-    <div id="coord-display">35.681236, 139.767125</div>
+    <div class="status-row">
+      <div id="coord-display">35.681236, 139.767125</div>
+      <select id="history-select" onchange="loadUserHistory(true)">
+        <option value="none">履歴: 非表示</option>
+        <option value="today" selected>履歴: 本日</option>
+        <option value="yesterday">履歴: 昨日</option>
+        <option value="1week">履歴: 過去1週間</option>
+        <option value="1month">履歴: 過去1か月</option>
+        <option value="3months">履歴: 過去3か月</option>
+        <option value="1year">履歴: 過去1年</option>
+        <option value="all">履歴: 全部</option>
+      </select>
+    </div>
   </div>
 
   <!-- 地図エリア -->
@@ -299,7 +352,6 @@
 
   <!-- 下部ボタン群 -->
   <div id="bottom-bar">
-    <!-- ★ 新規追加：管理番号入力＆スプレッドシート登録 -->
     <div class="register-row">
       <input type="text" id="manage-id-input" placeholder="管理番号を入力 (例: A-101)">
       <button id="register-btn" onclick="registerSpot()">💾 登録</button>
@@ -317,13 +369,17 @@
     // 💡【重要1】ログイン管理用スプレッドシートのGAS URL
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwgACE4MO8AGrVOtcNb3Z_Cut7ep7YdHI8oLwNIotZbbV4n2DG1kIuoXjsDA4iITOrLAQ/exec";
 
-    // 💡【重要2】記録シート用スプレッドシートのGAS URL（新しく発行したURL）
+    // 💡【重要2】記録シート用スプレッドシートのGAS URL
     const RECORD_GAS_URL = "https://script.google.com/macros/s/AKfycbycks7BOyUOOXy3_EkYvDcO4eetbXRLrbtQqY4zTuxIx7xZvhWpO91b7jxnsvSBEwkbOA/exec";
     // =========================================================================
 
     function unlockApp() {
       document.getElementById("login-screen").style.display = "none";
-      setTimeout(() => { map.invalidateSize(); }, 100);
+      setTimeout(() => {
+        map.invalidateSize();
+        // ログイン完了と同時に「本日」の自分の登録ピンを自動読込（地図移動はせずピンだけ立てる）
+        loadUserHistory(false);
+      }, 150);
     }
 
     async function attemptLogin(isAuto = false) {
@@ -395,7 +451,7 @@
       if (e.key === "Enter") attemptLogin(false);
     });
 
-    // --- 🗺️ 地図・高精度GPS・登録・コピーロジック ---
+    // --- 🗺️ 地図初期化 ---
     let initLat = 35.681236;
     let initLon = 139.767125;
     let initZoom = 17;
@@ -454,7 +510,7 @@
     let myLocMarker = null;
     let myLocCircle = null;
     let searchMarker = null;
-    let registeredLayer = L.layerGroup().addTo(map); // 登録済みピン表示レイヤー
+    let historyLayer = L.layerGroup().addTo(map);
     let currentCoordText = "";
     let gpsWatchId = null;
     let gpsStopTimer = null;
@@ -486,7 +542,112 @@
 
     updateCenterDisplay();
 
-    // ★ スプレッドシート「記録シート」へ登録する処理
+    // ピン用ユーティリティ（ポップアップ内のボタンから呼ばれる）
+    window.focusOnPin = function(lat, lon) {
+      map.setView([lat, lon], 19);
+      map.closePopup();
+    };
+
+    window.copyPinCoord = function(text) {
+      const status = document.getElementById('last-copied');
+      const done = () => { status.innerText = `📋 コピー済み: ${text}`; };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+      } else {
+        fallbackCopy(text, done);
+      }
+    };
+
+    // 履歴ピンを地図に描画する共通関数
+    function addHistoryMarker(item, autoOpen = false) {
+      const lat = Number(item.lat);
+      const lon = Number(item.lon);
+      const coordStr = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+
+      const marker = L.circleMarker([lat, lon], {
+        radius: 9,
+        fillColor: "#2e7d32",
+        color: "#ffffff",
+        weight: 3,
+        fillOpacity: 1
+      });
+
+      marker.bindTooltip(item.manageId, {
+        permanent: true,
+        direction: "top",
+        offset: [0, -10],
+        className: "history-label"
+      });
+
+      marker.bindPopup(`
+        <div style="font-size:13px; line-height:1.45; min-width:160px;">
+          <b>📌 ${item.manageId}</b><br>
+          <span style="color:#555;">🕒 ${item.recordDate}</span><br>
+          <span style="font-family:monospace;">${coordStr}</span>
+          <button class="popup-btn" onclick="focusOnPin(${lat}, ${lon})">🎯 ここに照準を合わせる</button>
+          <button class="popup-btn" style="background:#2e7d32;" onclick="copyPinCoord('${coordStr}')">📋 この座標をコピー</button>
+        </div>
+      `);
+
+      historyLayer.addLayer(marker);
+      if (autoOpen) marker.openPopup();
+      return marker;
+    }
+
+    // ★ 期間別に自分の登録履歴を取得して地図に表示
+    async function loadUserHistory(fitBoundsAfterLoad = true) {
+      const period = document.getElementById("history-select").value;
+      const statusEl = document.getElementById("last-copied");
+      const author = localStorage.getItem("pin_auth_id");
+
+      historyLayer.clearLayers();
+
+      if (period === "none") {
+        statusEl.innerText = "履歴ピンを非表示にしました";
+        return;
+      }
+      if (!author) return;
+
+      statusEl.innerText = "📡 登録履歴を読み込み中...";
+
+      try {
+        const url = `${RECORD_GAS_URL}?action=get_history&author=${encodeURIComponent(author)}&period=${encodeURIComponent(period)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.success) {
+          statusEl.innerText = `⚠️ 履歴取得失敗: ${data.msg}`;
+          return;
+        }
+
+        const items = data.items || [];
+        if (items.length === 0) {
+          statusEl.innerText = "該当期間の登録データはありません（0件）";
+          return;
+        }
+
+        const latLngs = [];
+        items.forEach(item => {
+          addHistoryMarker(item, false);
+          latLngs.push([item.lat, item.lon]);
+        });
+
+        statusEl.innerText = `📍 [${author}] の履歴: ${items.length}件表示中`;
+
+        // プルダウン切り替え時はピン全体が見える位置へ自動移動
+        if (fitBoundsAfterLoad && latLngs.length > 0) {
+          if (latLngs.length === 1) {
+            map.setView(latLngs[0], 17);
+          } else {
+            map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50], maxZoom: 18 });
+          }
+        }
+      } catch (err) {
+        statusEl.innerText = "⚠️ 履歴の通信エラーが発生しました";
+      }
+    }
+
+    // ★ スプレッドシート「記録シート」へ登録する処理（E列:記録日も自動入力）
     async function registerSpot() {
       const inputEl = document.getElementById("manage-id-input");
       const btnEl = document.getElementById("register-btn");
@@ -502,7 +663,6 @@
       const c = map.getCenter();
       const lat = c.lat.toFixed(6);
       const lon = c.lng.toFixed(6);
-      // 作成者としてログイン中のIDを自動取得
       const author = localStorage.getItem("pin_auth_id") || "未設定";
 
       btnEl.disabled = true;
@@ -510,7 +670,7 @@
       statusEl.innerText = `📡 「${manageId}」をスプレッドシートへ記録中...`;
 
       try {
-        const url = `${RECORD_GAS_URL}?manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
+        const url = `${RECORD_GAS_URL}?action=register&manageId=${encodeURIComponent(manageId)}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&author=${encodeURIComponent(author)}`;
         const res = await fetch(url);
         const text = await res.text();
 
@@ -522,18 +682,19 @@
         }
 
         if (data.success) {
-          // 地図上に「登録済みピン」を立てて視覚化
-          L.circleMarker([parseFloat(lat), parseFloat(lon)], {
-            radius: 9,
-            fillColor: "#2e7d32",
-            color: "#ffffff",
-            weight: 3,
-            fillOpacity: 1
-          }).bindPopup(`✅ 登録済: <b>${manageId}</b><br>${lat}, ${lon}<br>作成者: ${author}`).addTo(registeredLayer).openPopup();
+          // 履歴表示が「非表示」以外なら、今登録したピンも即座に地図へ追加
+          if (document.getElementById("history-select").value !== "none") {
+            addHistoryMarker({
+              manageId: manageId,
+              lat: parseFloat(lat),
+              lon: parseFloat(lon),
+              recordDate: data.recordDate || "たった今"
+            }, true);
+          }
 
           statusEl.style.color = "#1b5e20";
-          statusEl.innerText = `✅ 登録完了！ [${manageId}] (${lat}, ${lon})`;
-          inputEl.value = ""; // 次の入力のためクリア
+          statusEl.innerText = `✅ 登録完了！ [${manageId}] (${data.recordDate || ""})`;
+          inputEl.value = "";
           inputEl.blur();
         } else {
           statusEl.style.color = "#c62828";
@@ -551,7 +712,6 @@
       }
     }
 
-    // Enterキーでも登録できるようにする
     document.getElementById("manage-id-input").addEventListener("keypress", (e) => {
       if (e.key === "Enter") registerSpot();
     });
